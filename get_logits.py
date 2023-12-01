@@ -10,15 +10,16 @@ import tqdm
 K = 8
 SEED = 42
 FILE_NAME = "data/sw_cleaned.txt"
-MODEL = "pranaydeeps/swahbert-base-cased"
-INFERENCE_BATCH_SIZE = 32
+MODEL = "pranaydeeps/SwahBERT-base-cased"
+#MODEL = "bert-base-multilingual-cased"
+INFERENCE_BATCH_SIZE = 64
 
 set_seed(SEED)
 data = load_dataset("text", data_files={"train":FILE_NAME})
 tokenizer = AutoTokenizer.from_pretrained(MODEL)
 
 def preprocess_function(examples):
-    return tokenizer(examples["text"], padding="max_length", truncation=True,max_length=512)
+    return tokenizer(examples["text"], padding="max_length", truncation=True,max_length=128)
 
 tokenized_data = data.map(
     preprocess_function,
@@ -41,24 +42,22 @@ model.eval()
 to_save = []
 for batch in tqdm.tqdm(dataloader):
     batch = {k: v.to(device) for k, v in batch.items()}
+    #print(batch)
     with torch.no_grad():
         try:
             outputs = model(**batch).logits.cpu()
-        except:
+        except Exception as e:
+            print(e)
             print("SKIPPED A BATCH")
             continue
     for index, item in enumerate(batch['input_ids']):
         mask_token_index = torch.where(item==tokenizer.mask_token_id)[0]
         if mask_token_index.nelement() == 0:
-            #print("SKIPPING NO MASK")
+            print("SKIPPING NO MASK")
             continue
-        for mask in mask_token_index:
-            mask_token_logits = outputs[index, int(mask), :]
-            top_k = torch.topk(mask_token_logits, K)
-            values = top_k.values
-            indices = top_k.indices
-            to_save.append([item, torch.tensor([int(mask)]), indices, values])
+        top_k = torch.topk(outputs[index], K, dim=1)
+        values = top_k.values
+        indices = top_k.indices
+        to_save.append([item, batch['labels'][index], indices, values])
 
 torch.save(to_save, "outputs_{}.pt".format(MODEL.split('/')[-1]))
-            
-
